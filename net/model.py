@@ -11,8 +11,6 @@ from torchvision import transforms
 from transformers import BertConfig, BertModel
 from transformers.models.bert.modeling_bert import BertEncoder, BertPooler
 from util.loss import FocalLoss
-from evaluation.evaluator_radrestruct import AutoregressiveEvaluator
-from evaluation.predict_autoregressive_VQA_radrestruct import predict_autoregressive_VQA
 from net.image_encoding import ImageEncoderEfficientNet
 from net.question_encoding import QuestionEncoderBERT
 from einops import rearrange
@@ -225,14 +223,13 @@ class SelfAttention_qkv(nn.Module):
         return out
 
 class PrototypeBlock(nn.Module):
-    def __init__(self,dim,n_block,seq_len,heads=8,dim_head=64,num_prototype=1000):    
+    def __init__(self,dim,n_block,heads=8,dim_head=64,num_prototype=1000):    
         super().__init__()    
-        self.seq_len = seq_len
         self.layers = nn.ModuleList([])    
         for i in range(n_block):                 
             self.layers.append(nn.ModuleList([
                 LayerScale(dim,i+1,PreNorm(dim,HopfieldLayer(dim,num_prototype))),
-                LayerScale(dim,i+1,PreNorm(dim,SelfAttention(dim,seq_len=seq_len,heads=heads,dim_head=dim_head))),
+                LayerScale(dim,i+1,PreNorm(dim,SelfAttention(dim,heads=heads,dim_head=dim_head))),
             ]))
         pos_emb = None      
         self.register_buffer('pos_emb', pos_emb)
@@ -272,9 +269,6 @@ class Model(nn.Module):
                                         stored_pattern_as_static=True,
                                         scaling=args.scaling,
                                     )
-        self.fusion_config = BertConfig(vocab_size=1, hidden_size=args.hidden_size, num_hidden_layers=args.n_layers,
-                                        num_attention_heads=args.heads, intermediate_size=args.hidden_size * 4,
-                                        max_position_embeddings=args.max_position_embeddings)
 
         self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block)
 
@@ -404,41 +398,28 @@ class ModelWrapper(pl.LightningModule):
         preds = torch.cat(self.val_preds).cpu().numpy()
         targets = torch.cat(self.val_targets).cpu().numpy()
 
-        if "vqarad" in self.args.data_dir:
-            answer_types = torch.cat(self.val_answer_types).cpu().numpy()
-            total_acc = (preds == targets).mean() * 100.
-            closed_acc = (preds[answer_types == 0] == targets[answer_types == 0]).mean() * 100.
-            open_acc = (preds[answer_types == 1] == targets[answer_types == 1]).mean() * 100.
+        answer_types = torch.cat(self.val_answer_types).cpu().numpy()
+        total_acc = (preds == targets).mean() * 100.
+        closed_acc = (preds[answer_types == 0] == targets[answer_types == 0]).mean() * 100.
+        open_acc = (preds[answer_types == 1] == targets[answer_types == 1]).mean() * 100.
 
-            self.logger.experiment.add_scalar('Acc/val', total_acc, self.current_epoch)
-            self.logger.experiment.add_scalar('ClosedAcc/val', closed_acc, self.current_epoch)
-            self.logger.experiment.add_scalar('OpenAcc/val', open_acc, self.current_epoch)
+        self.logger.experiment.add_scalar('Acc/val', total_acc, self.current_epoch)
+        self.logger.experiment.add_scalar('ClosedAcc/val', closed_acc, self.current_epoch)
+        self.logger.experiment.add_scalar('OpenAcc/val', open_acc, self.current_epoch)
 
-            # clean accuracies without samples not occuring in the training set
-            total_acc1 = (preds[targets != -1] == targets[targets != -1]).mean() * 100.
+        # clean accuracies without samples not occuring in the training set
+        total_acc1 = (preds[targets != -1] == targets[targets != -1]).mean() * 100.
 
-            closed_acc1 = (preds[targets != -1][answer_types[targets != -1] == 0] ==
-                           targets[targets != -1][answer_types[targets != -1] == 0]).mean() * 100.
-            open_acc1 = (preds[targets != -1][answer_types[targets != -1] == 1] ==
-                         targets[targets != -1][answer_types[targets != -1] == 1]).mean() * 100.
-            # log
-            self.log('Acc/val_clean', total_acc1, on_step=False, on_epoch=True, prog_bar=True, logger=False)  # for saving
+        closed_acc1 = (preds[targets != -1][answer_types[targets != -1] == 0] ==
+                        targets[targets != -1][answer_types[targets != -1] == 0]).mean() * 100.
+        open_acc1 = (preds[targets != -1][answer_types[targets != -1] == 1] ==
+                        targets[targets != -1][answer_types[targets != -1] == 1]).mean() * 100.
+        # log
+        self.log('Acc/val_clean', total_acc1, on_step=False, on_epoch=True, prog_bar=True, logger=False)  # for saving
 
-            self.logger.experiment.add_scalar('Acc/val_clean', total_acc1, self.current_epoch)
-            self.logger.experiment.add_scalar('ClosedAcc/val_clean', closed_acc1, self.current_epoch)
-            self.logger.experiment.add_scalar('OpenAcc/val_clean', open_acc1, self.current_epoch)
-
-        else:
-            if self.current_epoch % 4 == 0:
-                # autoregressive evaluation on fixed sub_set of 100 train reports
-                preds = predict_autoregressive_VQA(self, self.ar_val_loader_vqa, self.args)
-                acc, acc_report, f1, _, _, _ = self.val_ar_evaluator_vqa.evaluate(preds, self.test_data_val)
-                self.logger.experiment.add_scalar('Acc/val', acc, self.current_epoch)
-                self.logger.experiment.add_scalar('Acc_Report/val', acc_report, self.current_epoch)
-                self.logger.experiment.add_scalar('F1/val', f1, self.current_epoch)
-                self.log('F1/val', f1, on_step=False, on_epoch=True, prog_bar=True, logger=False)  # for saving
-            else:
-                self.log('F1/val', 0., on_step=False, on_epoch=True, prog_bar=True, logger=False)  # ignore these epochs in ModelCheckpoint
+        self.logger.experiment.add_scalar('Acc/val_clean', total_acc1, self.current_epoch)
+        self.logger.experiment.add_scalar('ClosedAcc/val_clean', closed_acc1, self.current_epoch)
+        self.logger.experiment.add_scalar('OpenAcc/val_clean', open_acc1, self.current_epoch)
 
         self.val_preds = []
         self.val_targets = []
