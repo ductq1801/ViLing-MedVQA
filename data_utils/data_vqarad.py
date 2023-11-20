@@ -251,7 +251,7 @@ def create_image_to_question_dict(train_df, val_df):
 
 class VQARad(Dataset):
     """Standard per-question dataset"""
-    def __init__(self, df, tfm, args, mode='train'):
+    def __init__(self, df, tfm, args):
         self.df = df
         self.tfm = tfm
         self.args = args

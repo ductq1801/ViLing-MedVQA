@@ -47,6 +47,7 @@ if __name__ == '__main__':
     parser.add_argument('--img_feat_size', type=int, required=False, default=14, help="dimension of last pooling layer of img encoder")
     parser.add_argument('--num_question_tokens', type=int, required=False, default=259, help="number of tokens for question")
     parser.add_argument('--hidden_size', type=int, required=False, default=768, help="hidden size")
+    parser.add_argument('--n_block', type=int, required=False, default=8, help="number of prototype block")
     parser.add_argument('--vocab_size', type=int, required=False, default=30522, help="vocab size")
     parser.add_argument('--type_vocab_size', type=int, required=False, default=2, help="type vocab size")
     parser.add_argument('--heads', type=int, required=False, default=16, help="heads")
@@ -58,13 +59,6 @@ if __name__ == '__main__':
     parser.add_argument('--match_instances', action='store_true', default=False, help="do optimal instance matching")
 
     args = parser.parse_args()
-
-    args.num_image_tokens = args.img_feat_size ** 2
-    args.max_position_embeddings = args.num_image_tokens + 3 + args.num_question_tokens  # 3 for [CLS], [SEP], [SEP]
-    args.hidden_size_img_enc = args.hidden_size
-    if args.progressive:
-        args.hidden_size_img_enc = args.hidden_size
-        args.num_question_tokens = args.max_position_embeddings - 3 - args.num_image_tokens
 
     # create directory for saving params
     if not os.path.exists(f'{args.save_dir}/{args.run_name}'):
@@ -79,7 +73,7 @@ if __name__ == '__main__':
 
     img_to_q_dict_train, img_to_q_dict_all = create_image_to_question_dict(train_df, val_df)
 
-    args.num_classes = 458
+    args.num_classes = 495
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -108,8 +102,8 @@ if __name__ == '__main__':
     train_tfm = transforms.Compose([img_tfm, aug_tfm, norm_tfm]) if norm_tfm is not None else transforms.Compose([img_tfm, aug_tfm])
     test_tfm = transforms.Compose([img_tfm, norm_tfm]) if norm_tfm is not None else img_tfm
 
-    traindataset = VQARad(train_df, img_to_q_dict_train, tfm=train_tfm, args=args, mode='train')
-    valdataset = VQARad(val_df, img_to_q_dict_all, tfm=test_tfm, args=args, mode='val')
+    traindataset = VQARad(train_df, tfm=train_tfm, args=args)
+    valdataset = VQARad(val_df, tfm=test_tfm, args=args)
 
     trainloader = DataLoader(traindataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     valloader = DataLoader(valdataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
