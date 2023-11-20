@@ -13,7 +13,7 @@ class ImageEncoderEfficientNet(nn.Module):
         self.args = args
         self.model = timm.create_model('tf_efficientnet_b5', pretrained=True)
         config = resolve_data_config({}, model=self.model)
-
+        self.transforms = create_transform(**config)
         self.model = nn.Sequential(*list(self.model.children())[:-2])
 
         self.relu = nn.ReLU()
