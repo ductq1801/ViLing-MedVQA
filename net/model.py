@@ -358,12 +358,10 @@ class ModelWrapper(pl.LightningModule):
         out, _ = self(img, question_token, q_attention_mask)
 
         logits = out
-        if "vqarad" in self.args.data_dir:
-            pred = logits.softmax(1).argmax(1).detach()
-            self.val_soft_scores.append(logits.softmax(1).detach())
-        else:  # multi-label classification
-            pred = (logits.sigmoid().detach() > 0.5).detach().long()
-            self.val_soft_scores.append(logits.sigmoid().detach())
+
+        pred = logits.softmax(1).argmax(1).detach()
+        self.val_soft_scores.append(logits.softmax(1).detach())
+
 
         self.val_preds.append(pred)
         self.val_targets.append(target)
@@ -384,24 +382,15 @@ class ModelWrapper(pl.LightningModule):
         preds = torch.cat(self.train_preds).cpu().numpy()
         targets = torch.cat(self.train_targets).cpu().numpy()
 
-        if "vqarad" in self.args.data_dir:
-            answer_types = torch.cat(self.train_answer_types).cpu().numpy()
-            total_acc = (preds == targets).mean() * 100.
-            closed_acc = (preds[answer_types == 0] == targets[answer_types == 0]).mean() * 100.
-            open_acc = (preds[answer_types == 1] == targets[answer_types == 1]).mean() * 100.
 
-            self.logger.experiment.add_scalar('Acc/train', total_acc, self.current_epoch)
-            self.logger.experiment.add_scalar('ClosedAcc/train', closed_acc, self.current_epoch)
-            self.logger.experiment.add_scalar('OpenAcc/train', open_acc, self.current_epoch)
+        answer_types = torch.cat(self.train_answer_types).cpu().numpy()
+        total_acc = (preds == targets).mean() * 100.
+        closed_acc = (preds[answer_types == 0] == targets[answer_types == 0]).mean() * 100.
+        open_acc = (preds[answer_types == 1] == targets[answer_types == 1]).mean() * 100.
 
-        else:
-            if self.current_epoch % 4 == 0:
-                # autoregressive evaluation on fixed sub_set of 100 train reports
-                preds = predict_autoregressive_VQA(self, self.ar_train_loader_vqa, self.args)
-                acc, acc_report, f1, _, _, _ = self.train_ar_evaluator_vqa.evaluate(preds, self.test_data_train)
-                self.logger.experiment.add_scalar('Acc/train', acc, self.current_epoch)
-                self.logger.experiment.add_scalar('Acc_Report/train', acc_report, self.current_epoch)
-                self.logger.experiment.add_scalar('F1/train', f1, self.current_epoch)
+        self.logger.experiment.add_scalar('Acc/train', total_acc, self.current_epoch)
+        self.logger.experiment.add_scalar('ClosedAcc/train', closed_acc, self.current_epoch)
+        self.logger.experiment.add_scalar('OpenAcc/train', open_acc, self.current_epoch)
 
         self.train_preds = []
         self.train_targets = []
