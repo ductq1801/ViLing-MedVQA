@@ -16,8 +16,35 @@ from evaluation.evaluator_radrestruct import AutoregressiveEvaluator
 from evaluation.predict_autoregressive_VQA_radrestruct import predict_autoregressive_VQA
 from net.image_encoding import ImageEncoderEfficientNet
 from net.question_encoding import QuestionEncoderBERT
+from einops import rearrange
 
+class LayerScale(nn.Module):
+    def __init__(self, dim, depth, fn):
+        super().__init__()
+        if depth <= 18:
+            init_eps = 0.1
+        elif depth > 18 and depth <= 24:
+            init_eps = 1e-5
+        else:
+            init_eps = 1e-6
+        scale = torch.zeros(1, 1, dim).fill_(init_eps)
+        self.scale = nn.Parameter(scale)
+        self.fn = fn
 
+    def forward(self, x):
+        return self.fn(x) * self.scale
+
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn, sandwich = False):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.norm_out = nn.LayerNorm(dim) if sandwich else nn.Identity()
+        self.fn = fn
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.fn(x)
+        return self.norm_out(x)
 # implementation of 2D positional encoding from https://github.com/gaopengcuhk/Stable-Pix2Seq
 def create_pos_encoding(args):
     temperature = 10000
@@ -115,7 +142,103 @@ class MyBertEmbeddings(nn.Module):
         embeddings = self.dropout(embeddings)
         return embeddings
 
+class HopfieldLayer(nn.Module):
+    def __init__(self,dim,n_prototype=1000,dropout=0.1):
+        super().__init__()
+        self.beta = 1./sqrt(dim)
+        self.lookup_matrix = nn.Linear(dim, n_prototype, bias = False)
+        self.content_matrix = nn.Linear(n_prototype,dim,bias = False)
+        self.softmax = torch.softmax
+        self.dropout = nn.Dropout(dropout)
+    def forward(self, x):
+        lookup = self.softmax(self.lookup_matrix(x) * self.beta, dim=-1)
+        content = self.content_matrix(lookup)
+        return self.dropout(content)
 
+class SelfAttention(nn.Module):
+    def __init__(self,dim,seq_len,heads=8,dim_head=64,dropout=0.1):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        self.beta = 1./sqrt(dim_head)
+        self.heads = heads
+        self.seq_len = seq_len
+        self.to_qk = nn.Linear(dim, inner_dim*2, bias = False)
+        self.to_out = nn.Sequential(
+                        nn.Linear(inner_dim, dim),
+                        nn.Dropout(dropout),
+                        )
+        self.softmax = torch.softmax
+        
+    def forward(self, x):
+        h, device = self.heads, x.device
+        qk = self.to_qk(x).chunk(2, dim = -1)       
+        q, k = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), qk)        
+
+        bqk = torch.einsum('b h i d, b h j d -> b h i j', q* self.beta, k)
+        mask_value = max_neg_value(bqk)
+
+        # causality
+        i, j = bqk.shape[-2:]
+        mask = torch.ones(i, j, device = device).triu_(j - i + 1).bool()    
+        bqk = self.softmax(bqk.masked_fill_(mask, mask_value), dim=-1)
+
+        bqkk = torch.einsum('b h i j, b h j d -> b h i d', bqk, k)
+        out = rearrange(bqkk, 'b h n d -> b n (h d)')
+        out =  self.to_out(out)
+        return out
+
+class SelfAttention_qkv(nn.Module):
+    def __init__(self,dim,seq_len,heads=8,dim_head=64,dropout=0.1):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        self.beta = 1./sqrt(dim_head)
+        self.heads = heads
+        self.seq_len = seq_len
+        self.q = nn.Linear(dim, inner_dim, bias = False)
+        self.k = nn.Linear(dim, inner_dim, bias = False)
+        self.v = nn.Linear(dim, inner_dim, bias = False)
+        self.to_out = nn.Sequential(
+                        nn.Linear(inner_dim, dim),
+                        nn.Dropout(dropout),
+                        )
+        self.softmax = torch.softmax
+        
+    def forward(self, x):
+        h, device = self.heads, x.device
+        q = rearrange(self.q(x), 'b n (h d) -> b h n d', h = h)
+        k = rearrange(self.k(x), 'b n (h d) -> b h n d', h = h)
+        v = rearrange(self.v(x), 'b n (h d) -> b h n d', h = h)         
+
+        bqk = torch.einsum('b h i d, b h j d -> b h i j', q* self.beta, k)
+        mask_value = max_neg_value(bqk)
+
+        # causality
+        i, j = bqk.shape[-2:]
+        mask = torch.ones(i, j, device = device).triu_(j - i + 1).bool()    
+        bqk = self.softmax(bqk.masked_fill_(mask, mask_value), dim=-1)
+
+        bqkv = torch.einsum('b h i j, b h j d -> b h i d', bqk, v)
+        out = rearrange(bqkv, 'b h n d -> b n (h d)')
+        out =  self.to_out(out)
+        return out
+
+class PrototypeBlock(nn.Module):
+    def __init__(self,dim,n_block,seq_len,heads=8,dim_head=64,num_prototype=1000):    
+        super().__init__()    
+        self.seq_len = seq_len
+        self.layers = nn.ModuleList([])    
+        for i in range(n_block):                 
+            self.layers.append(nn.ModuleList([
+                LayerScale(dim,i+1,PreNorm(dim,HopfieldLayer(dim,num_prototype))),
+                LayerScale(dim,i+1,PreNorm(dim,SelfAttention(dim,seq_len=seq_len,heads=heads,dim_head=dim_head))),
+            ]))
+        pos_emb = None      
+        self.register_buffer('pos_emb', pos_emb)
+    def forward(self, x):
+        for (f, g) in self.layers:
+            x = x + f(x)
+            x = x + g(x)
+        return x
 class MyBertModel(BertModel):
     """
 
