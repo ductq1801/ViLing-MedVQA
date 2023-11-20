@@ -11,13 +11,16 @@ from torchvision import transforms
 from transformers import BertConfig, BertModel
 from transformers.models.bert.modeling_bert import BertEncoder, BertPooler
 from util.loss import FocalLoss
-from data_utils.data_radrestruct import RadReStructEval, get_targets_for_split
 from evaluation.evaluator_radrestruct import AutoregressiveEvaluator
 from evaluation.predict_autoregressive_VQA_radrestruct import predict_autoregressive_VQA
 from net.image_encoding import ImageEncoderEfficientNet
 from net.question_encoding import QuestionEncoderBERT
 from einops import rearrange
+from hflayers import Hopfield
+from math import sqrt
 
+def max_neg_value(t):
+    return -torch.finfo(t.dtype).max
 class LayerScale(nn.Module):
     def __init__(self, dim, depth, fn):
         super().__init__()
@@ -156,12 +159,11 @@ class HopfieldLayer(nn.Module):
         return self.dropout(content)
 
 class SelfAttention(nn.Module):
-    def __init__(self,dim,seq_len,heads=8,dim_head=64,dropout=0.1):
+    def __init__(self,dim,heads=8,dim_head=64,dropout=0.1):
         super().__init__()
         inner_dim = dim_head *  heads
         self.beta = 1./sqrt(dim_head)
         self.heads = heads
-        self.seq_len = seq_len
         self.to_qk = nn.Linear(dim, inner_dim*2, bias = False)
         self.to_out = nn.Sequential(
                         nn.Linear(inner_dim, dim),
@@ -265,49 +267,35 @@ class Model(nn.Module):
 
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
-
+        self.associate_memory = Hopfield(input_size=args.hidden_size,
+                                        normalize_hopfield_space = True,                          
+                                        stored_pattern_as_static=True,
+                                        scaling=args.scaling,
+                                    )
         self.fusion_config = BertConfig(vocab_size=1, hidden_size=args.hidden_size, num_hidden_layers=args.n_layers,
                                         num_attention_heads=args.heads, intermediate_size=args.hidden_size * 4,
                                         max_position_embeddings=args.max_position_embeddings)
 
-        self.fusion = MyBertModel(config=self.fusion_config, args=args)
+        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block)
 
-        if "vqarad" in args.data_dir:
-            self.classifier = nn.Linear(args.hidden_size, args.num_classes)
-        else:
-            self.classifier = nn.Sequential(
+        self.classifier = nn.Sequential(
                 nn.Dropout(args.classifier_dropout),
                 nn.Linear(args.hidden_size, 256),
                 nn.ReLU(),
                 # nn.BatchNorm1d(256),
                 nn.Linear(256, args.num_classes))
 
-    def forward(self, img, input_ids, q_attn_mask, attn_mask, token_type_ids_q=None, mode='train'):
+    def forward(self, img, input_ids, q_attn_mask):
 
-        image_features = self.image_encoder(img, mode=mode)
+        image_features = self.image_encoder(img)
         text_features = self.question_encoder(input_ids, q_attn_mask)
-        cls_tokens = text_features[:, 0:1]
 
-        h = torch.cat((cls_tokens, image_features, text_features[:, 1:]), dim=1)[:, :self.args.max_position_embeddings]
-        if self.args.progressive:
-            assert token_type_ids_q is not None
-            token_type_ids = torch.zeros(h.size(0), h.size(1), dtype=torch.long, device=h.device)
-            token_type_ids[:, 0] = 1  # cls token
-            token_type_ids[:, 1:image_features.size(1) + 1] = 0  # image features
-            token_type_ids[:, image_features.size(1) + 1:] = token_type_ids_q[:, 1:self.args.max_position_embeddings - (
-                image_features.size(1))]  # drop CLS token_type_id as added before already and cut unnecessary padding
-        else:
-            token_type_ids = torch.zeros(h.size(0), h.size(1), dtype=torch.long, device=h.device)
-            token_type_ids[:, 0] = 1
-            token_type_ids[:, 1:image_features.size(1) + 1] = 0
-            token_type_ids[:, image_features.size(1) + 1:] = 1
+        h = torch.cat((image_features, text_features), dim=1)
+        m = self.associate_memory(h)
+        out = self.fusion(torch.cat((m,h),dim=1))
+        logits = self.classifier(out.mean(dim=1))
 
-        out = self.fusion(inputs_embeds=h, attention_mask=attn_mask, token_type_ids=token_type_ids, output_attentions=True)
-        h = out['last_hidden_state']
-        attentions = out['attentions'][0]
-        logits = self.classifier(h.mean(dim=1))
-
-        return logits, attentions
+        return logits
 
 
 class ModelWrapper(pl.LightningModule):
@@ -318,38 +306,7 @@ class ModelWrapper(pl.LightningModule):
         self.train_df = train_df
         self.val_df = val_df
 
-        if 'radrestruct' in args.data_dir:
-            self.test_data_train = get_targets_for_split('train', limit_data=30)
-            self.test_data_val = get_targets_for_split('val', limit_data=None)
-            self.train_ar_evaluator_vqa = AutoregressiveEvaluator()
-            self.val_ar_evaluator_vqa = AutoregressiveEvaluator()
-
-            # handle info dicts in collate_fn
-            def collate_dict_fn(batch, *, collate_fn_map):
-                return batch
-
-            def custom_collate(batch):
-                default_collate_fn_map.update({dict: collate_dict_fn})
-                return collate(batch, collate_fn_map=default_collate_fn_map)
-
-            img_tfm = self.model.image_encoder.img_tfm
-            norm_tfm = self.model.image_encoder.norm_tfm
-            test_tfm = transforms.Compose([img_tfm, norm_tfm]) if norm_tfm is not None else img_tfm
-            self.ar_valdataset = RadReStructEval(tfm=test_tfm, mode='val', args=args, limit_data=None)
-            self.ar_val_loader_vqa = DataLoader(self.ar_valdataset, batch_size=1, shuffle=False, num_workers=args.num_workers,
-                                                collate_fn=custom_collate)
-            self.ar_traindataset = RadReStructEval(tfm=test_tfm, mode='train', args=args, limit_data=30)
-            self.ar_train_loader_vqa = DataLoader(self.ar_traindataset, batch_size=1, shuffle=False, num_workers=args.num_workers,
-                                                  collate_fn=custom_collate)
-
-            pos_weights_path = 'data/radrestruct/all_pos_weights.json'
-            with open(pos_weights_path, 'r') as f:
-                self.pos_weight = torch.tensor(json.load(f), dtype=torch.float32)
-
-            self.loss_fn = BCEWithLogitsLoss(pos_weight=self.pos_weight, reduction="none")
-
-        else:
-            self.loss_fn = FocalLoss(0.3)
+        self.loss_fn = FocalLoss(0.6)
 
         self.train_preds = []
         self.val_preds = []
@@ -366,70 +323,39 @@ class ModelWrapper(pl.LightningModule):
         self.train_answer_types = []
         self.val_answer_types = []
 
-        if "radrestruct" in args.data_dir:
-            with open('data/radrestruct/answer_options.json', 'r') as f:
-                self.answer_options = json.load(f)
-
-    def get_masked_loss(self, loss, mask, targets, path_pos_weight=None):
-
-        if path_pos_weight is not None:
-            # for pos predictions multiply loss with path_pos_weight, for negatives with 1 (no change)
-            loss = (targets * loss * path_pos_weight) + ((1 - targets) * loss)
-
-        # get mean loss when only considering non-masked options
-        masked_loss = loss.masked_select(mask).mean()
-
-        return masked_loss
-
-    def forward(self, img, input_ids, q_attn_mask, attn_mask, token_type_ids_q, mode='train'):
-        return self.model(img, input_ids, q_attn_mask, attn_mask, token_type_ids_q, mode=mode)
+    def forward(self, img, input_ids, q_attn_mask):
+        return self.model(img, input_ids, q_attn_mask)
 
     def training_step(self, batch, batch_idx, dataset="vqarad"):
-        if "vqarad" in self.args.data_dir:
-            img, question_token, q_attention_mask, attn_mask, target, answer_type, token_type_ids_q = batch
-        else:
-            img, question_token, q_attention_mask, attn_mask, target, token_type_ids_q, info, mask = batch
-
+        img, question_token, q_attention_mask, attn_mask, target,answer_type  = batch
         question_token = question_token.squeeze(1)
         attn_mask = attn_mask.squeeze(1)
         q_attention_mask = q_attention_mask.squeeze(1)
 
-        out, _ = self(img, question_token, q_attention_mask, attn_mask, token_type_ids_q, mode='train')
+        out = self(img, question_token, q_attention_mask)
 
         logits = out
-        if "vqarad" in self.args.data_dir:
-            pred = logits.softmax(1).argmax(1).detach()
-        else:  # multi-label classification
-            pred = (logits.sigmoid().detach() > 0.5).detach().long()
-            self.train_soft_scores.append(logits.sigmoid().detach())
+        pred = logits.softmax(1).argmax(1).detach()
 
         self.train_preds.append(pred)
         self.train_targets.append(target)
 
-        if "vqarad" in self.args.data_dir:
-            self.train_answer_types.append(answer_type)
-        else:
-            self.train_infos.append(info)
+        self.train_answer_types.append(answer_type)
 
         loss = self.loss_fn(logits.softmax(1), target)
-        if not "vqarad" in self.args.data_dir:
-            loss = self.get_masked_loss(loss, mask, target, None)  # only use loss of occuring classes
 
         self.log('Loss/train', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        if "vqarad" in self.args.data_dir:
-            img, question_token, q_attention_mask, attn_mask, target, answer_type, token_type_ids_q = batch
-        else:
-            img, question_token, q_attention_mask, attn_mask, target, token_type_ids_q, info, mask = batch
+        img, question_token, q_attention_mask, attn_mask, target,answer_type  = batch
 
         question_token = question_token.squeeze(1)
         attn_mask = attn_mask.squeeze(1)
         q_attention_mask = q_attention_mask.squeeze(1)
 
-        out, _ = self(img, question_token, q_attention_mask, attn_mask, token_type_ids_q, mode='val')
+        out, _ = self(img, question_token, q_attention_mask)
 
         logits = out
         if "vqarad" in self.args.data_dir:
@@ -441,18 +367,11 @@ class ModelWrapper(pl.LightningModule):
 
         self.val_preds.append(pred)
         self.val_targets.append(target)
-        if "vqarad" in self.args.data_dir:
-            self.val_answer_types.append(answer_type)
-        else:
-            self.val_infos.append(info)
+        self.val_answer_types.append(answer_type)
 
-        if "vqarad" in self.args.data_dir:
-            loss = self.loss_fn(logits[target != -1].softmax(1), target[target != -1])
-        else:
-            loss = self.loss_fn(logits, target.squeeze(0))
-            # only use loss of occuring classes
-            if "radrestruct" in self.args.data_dir:
-                loss = self.get_masked_loss(loss, mask, target, None)
+
+        loss = self.loss_fn(logits[target != -1].softmax(1), target[target != -1])
+
         self.log('Loss/val', loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
         return loss

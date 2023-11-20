@@ -13,9 +13,6 @@ class ImageEncoderEfficientNet(nn.Module):
         self.args = args
         self.model = timm.create_model('tf_efficientnet_b5', pretrained=True)
         config = resolve_data_config({}, model=self.model)
-        self.transforms = create_transform(**config)
-        if 'radrestruct' in args.data_dir:
-            self.transforms.transforms[0] = transforms.Resize((488, 488))
 
         self.model = nn.Sequential(*list(self.model.children())[:-2])
 
@@ -28,7 +25,7 @@ class ImageEncoderEfficientNet(nn.Module):
         self.norm_tfm = self.transforms.transforms[-1]
         self.resize_size = self.img_tfm.transforms[1].size  # size of CenterCrop
 
-    def forward(self, img, mode='train'):
+    def forward(self, img):
         x = self.model(img)
         x = self.rescale_conv(x)
         x = self.rescale_pool(x)
