@@ -256,7 +256,6 @@ class VQARad(Dataset):
         self.tfm = tfm
         self.args = args
         self.tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
-    
     def __len__(self):
         return len(self.df)
 
@@ -265,13 +264,15 @@ class VQARad(Dataset):
         question = self.df[idx]['question']
         answer = self.df[idx]['answer']['labels'][0] if len(self.df[idx]['answer']['labels']) > 0 else -1  # answer not in train set
         answer_type = 0 if self.df[idx]['answer_type'] == 'CLOSED' else 1
-        
+        token = self.tokenizer(question)
+        question_encode = token['input_ids']
+        q_attn_mask = token['attention_mask']
         img = Image.open(path)
 
         if self.tfm:
             img = self.tfm(img)
 
-        return img, torch.tensor(answer, dtype=torch.long),  question, self.df[idx]['answer_text'],self.df[idx]['qid']
+        return img, torch.tensor(question_encode, dtype=torch.long), torch.tensor(q_attn_mask, dtype=torch.long),torch.tensor(answer, dtype=torch.long),torch.tensor(answer_type, dtype=torch.long)
 
 
 class VQARadEval(Dataset):

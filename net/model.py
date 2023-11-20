@@ -321,7 +321,7 @@ class ModelWrapper(pl.LightningModule):
         return self.model(img, input_ids, q_attn_mask)
 
     def training_step(self, batch, batch_idx, dataset="vqarad"):
-        img, question_token, q_attention_mask, attn_mask, target,answer_type  = batch
+        img, question_token, q_attention_mask, target,answer_type  = batch
         question_token = question_token.squeeze(1)
         attn_mask = attn_mask.squeeze(1)
         q_attention_mask = q_attention_mask.squeeze(1)
@@ -343,7 +343,7 @@ class ModelWrapper(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        img, question_token, q_attention_mask, attn_mask, target,answer_type  = batch
+        img, question_token, q_attention_mask, target,answer_type  = batch
 
         question_token = question_token.squeeze(1)
         attn_mask = attn_mask.squeeze(1)
