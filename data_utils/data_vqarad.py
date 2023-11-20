@@ -251,13 +251,10 @@ def create_image_to_question_dict(train_df, val_df):
 
 class VQARad(Dataset):
     """Standard per-question dataset"""
-    def __init__(self, df, img_to_q_dict, tfm, args, mode='train'):
+    def __init__(self, df, tfm, args, mode='train'):
         self.df = df
         self.tfm = tfm
         self.args = args
-        self.img_to_q_dict = img_to_q_dict
-
-        self.tokenizer = AutoTokenizer.from_pretrained(args.bert_model, trust_remote_code=True)
 
         with open('data/vqarad/trainval_label2ans.pkl', 'rb') as f:
             self.label2ans = cPickle.load(f)
@@ -271,31 +268,14 @@ class VQARad(Dataset):
         path = os.path.join('data/vqarad/images', self.df[idx]['image_name'])
         question = self.df[idx]['question']
         answer = self.df[idx]['answer']['labels'][0] if len(self.df[idx]['answer']['labels']) > 0 else -1  # answer not in train set
-        answer_type = 0 if self.df[idx]['answer_type'] == 'CLOSED' else 1
 
         img = Image.open(path)
         if self.tfm:
             img = self.tfm(img)
 
         token_type_ids = torch.tensor(0)
-        if self.args.progressive:
-            tokens, q_attn_mask, attn_mask, token_type_ids = encode_text_progressive(self.df[idx]['image_name'], question, self.df[idx]['qid'],
-                                                                                     self.df[idx]['question_type'],
-                                                                                     self.img_to_q_dict, self.tokenizer, self.args, mode=self.mode)
-        else:
-            tokens, q_attn_mask, attn_mask = encode_text(question, self.tokenizer, self.args)
 
-        if self.mode == 'predict':
-            image_name = self.df[idx]['image_name']
-            history, _ = get_encoded_history(self.tokenizer, self.img_to_q_dict[image_name], question, self.df[idx]['qid'],
-                                             self.df[idx]['question_type'], 259, mode='predict')
-
-            return img, torch.tensor(tokens, dtype=torch.long), torch.tensor(q_attn_mask, dtype=torch.long), torch.tensor(attn_mask,dtype=torch.long),\
-                   torch.tensor(answer, dtype=torch.long), torch.tensor(answer_type, dtype=torch.long), token_type_ids, question, self.df[idx]['answer_text'], self.df[idx]['image_name'], \
-                   self.tokenizer.decode(history), self.df[idx]['qid']
-        else:
-            return img, torch.tensor(tokens, dtype=torch.long), torch.tensor(q_attn_mask, dtype=torch.long), torch.tensor(attn_mask, dtype=torch.long), \
-                   torch.tensor(answer, dtype=torch.long), torch.tensor(answer_type, dtype=torch.long), token_type_ids
+        return img, torch.tensor(answer, dtype=torch.long),  question, self.df[idx]['answer_text'],self.df[idx]['qid']
 
 
 class VQARadEval(Dataset):
