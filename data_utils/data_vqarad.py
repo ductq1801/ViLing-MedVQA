@@ -264,7 +264,7 @@ class VQARad(Dataset):
         question = self.df[idx]['question']
         answer = self.df[idx]['answer']['labels'][0] if len(self.df[idx]['answer']['labels']) > 0 else -1  # answer not in train set
         answer_type = 0 if self.df[idx]['answer_type'] == 'CLOSED' else 1
-        token = self.tokenizer(question)
+        token = self.tokenizer(question,max_length=self.args.num_question_tokens,truncation=True,padding='max_length')
         question_encode = token['input_ids']
         q_attn_mask = token['attention_mask']
         img = Image.open(path)

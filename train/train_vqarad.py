@@ -45,7 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--smoothing', type=float, required=False, default=None, help="label smoothing")
 
     parser.add_argument('--img_feat_size', type=int, required=False, default=14, help="dimension of last pooling layer of img encoder")
-    parser.add_argument('--num_question_tokens', type=int, required=False, default=259, help="number of tokens for question")
+    parser.add_argument('--num_question_tokens', type=int, required=False, default=30, help="number of tokens for question")
     parser.add_argument('--hidden_size', type=int, required=False, default=768, help="hidden size")
     parser.add_argument('--n_block', type=int, required=False, default=8, help="number of prototype block")
     parser.add_argument('--vocab_size', type=int, required=False, default=30522, help="vocab size")
@@ -53,9 +53,10 @@ if __name__ == '__main__':
     parser.add_argument('--heads', type=int, required=False, default=16, help="heads")
     parser.add_argument('--n_layers', type=int, required=False, default=1, help="num of fusion layers")
     parser.add_argument('--acc_grad_batches', type=int, required=False, default=None, help="how many batches to accumulate gradients")
+    parser.add_argument('--scaling', type=int, required=False, default=0.15, help="scaling in hopfield")
 
     ''' only relevant for radrestruct'''
-    parser.add_argument('--classifier_dropout', type=float, required=False, default=0.0, help="how often should image be dropped")
+    parser.add_argument('--classifier_dropout', type=float, required=False, default=0.1, help="how often should image be dropped")
     parser.add_argument('--match_instances', action='store_true', default=False, help="do optimal instance matching")
 
     args = parser.parse_args()
@@ -96,7 +97,7 @@ if __name__ == '__main__':
     aug_tfm = transforms.Compose([transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
                                   # Cutout(),
                                   transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4),
-                                  transforms.RandomResizedCrop(resize_size, scale=(0.5, 1.0), ratio=(0.75, 1.333)),
+                                  transforms.RandomResizedCrop(resize_size, scale=(0.5, 1.0), ratio=(0.75, 1.333),antialias=None),
                                   transforms.RandomRotation(10)])
 
     train_tfm = transforms.Compose([img_tfm, aug_tfm, norm_tfm]) if norm_tfm is not None else transforms.Compose([img_tfm, aug_tfm])
