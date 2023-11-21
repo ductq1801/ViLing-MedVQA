@@ -53,8 +53,9 @@ if __name__ == '__main__':
     parser.add_argument('--heads', type=int, required=False, default=16, help="heads")
     parser.add_argument('--n_layers', type=int, required=False, default=1, help="num of fusion layers")
     parser.add_argument('--acc_grad_batches', type=int, required=False, default=None, help="how many batches to accumulate gradients")
-    parser.add_argument('--scaling', type=int, required=False, default=0.15, help="scaling in hopfield")
+    parser.add_argument('--scaling', type=int, required=False, default=0.0442, help="scaling in hopfield")
     parser.add_argument('--quantity', type=int, required=False, default=2, help="Quantity in hopfield pooling")
+    parser.add_argument('--classifier_hopfield', type=int, required=False, default=2, help="Quantity in hopfield pooling")
     ''' only relevant for radrestruct'''
     parser.add_argument('--classifier_dropout', type=float, required=False, default=0.1, help="how often should image be dropped")
     parser.add_argument('--match_instances', action='store_true', default=False, help="do optimal instance matching")

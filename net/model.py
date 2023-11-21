@@ -16,6 +16,8 @@ from net.question_encoding import QuestionEncoderBERT
 from einops import rearrange
 from hflayers import Hopfield,HopfieldPooling
 from math import sqrt
+from functools import partial
+from initialization import init_weights
 
 def max_neg_value(t):
     return -torch.finfo(t.dtype).max
@@ -263,14 +265,25 @@ class Model(nn.Module):
 
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
-        self.associate_memory = Hopfield(input_size=args.hidden_size,
-                                        hidden_size=8,
+        self.associate_question_memory = Hopfield(input_size=args.hidden_size,
+                                        hidden_size= 512,
                                         num_heads=8, 
                                         #normalize_hopfield_space = True,                          
                                         #stored_pattern_as_static=True,
                                         scaling=args.scaling,
+                                        dropout=args.classifier_hopfield,
                                     )
-
+        self.associate_image_memory = Hopfield(input_size=args.hidden_size,
+                                        hidden_size= 512,
+                                        num_heads=8, 
+                                        #normalize_hopfield_space = True,                          
+                                        #stored_pattern_as_static=True,
+                                        scaling=args.scaling,
+                                        dropout=args.classifier_hopfield,
+                                    )
+        hopfield_initialization = partial(init_weights, 'linear')
+        self.associate_question_memory.apply(hopfield_initialization)
+        self.associate_image_memory.apply(hopfield_initialization)
         self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block)
         self.pool = HopfieldPooling(input_size=args.hidden_size,                          # Y
                                     hidden_size=16,                         # Q
@@ -288,9 +301,9 @@ class Model(nn.Module):
         text_features = self.question_encoder(input_ids, q_attn_mask)
 
         h = torch.cat((image_features, text_features), dim=1)
-        m = self.associate_memory(h)
-
-        out = self.fusion(torch.cat((m,h),dim=1))
+        c_i = self.associate_image_memory((h,image_features,h))
+        c_q = self.associate_question_memory((h,text_features,h))
+        out = self.fusion(torch.cat((c_q,h,c_i),dim=1))
         out = self.pool(out)
         logits = self.classifier(out)
 
