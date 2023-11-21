@@ -14,7 +14,7 @@ from util.loss import FocalLoss
 from net.image_encoding import ImageEncoderEfficientNet
 from net.question_encoding import QuestionEncoderBERT
 from einops import rearrange
-from hflayers import Hopfield
+from hflayers import Hopfield,HopfieldPooling
 from math import sqrt
 
 def max_neg_value(t):
@@ -188,12 +188,11 @@ class SelfAttention(nn.Module):
         return out
 
 class SelfAttention_qkv(nn.Module):
-    def __init__(self,dim,seq_len,heads=8,dim_head=64,dropout=0.1):
+    def __init__(self,dim,heads=8,dim_head=64,dropout=0.1):
         super().__init__()
         inner_dim = dim_head *  heads
         self.beta = 1./sqrt(dim_head)
         self.heads = heads
-        self.seq_len = seq_len
         self.q = nn.Linear(dim, inner_dim, bias = False)
         self.k = nn.Linear(dim, inner_dim, bias = False)
         self.v = nn.Linear(dim, inner_dim, bias = False)
@@ -265,19 +264,23 @@ class Model(nn.Module):
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
         self.associate_memory = Hopfield(input_size=args.hidden_size,
-                                        normalize_hopfield_space = True,                          
-                                        stored_pattern_as_static=True,
+                                        hidden_size=8,
+                                        num_heads=8, 
+                                        #normalize_hopfield_space = True,                          
+                                        #stored_pattern_as_static=True,
                                         scaling=args.scaling,
                                     )
 
         self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block)
-
+        self.pool = HopfieldPooling(input_size=args.hidden_size,                          # Y
+                                    hidden_size=16,                         # Q
+                                    scaling=args.scaling,
+                                    quantity=args.quantity) 
         self.classifier = nn.Sequential(
                 nn.Dropout(args.classifier_dropout),
-                nn.Linear(args.hidden_size, 256),
+                nn.Linear(args.hidden_size*args.quantity, 512),
                 nn.ReLU(),
-                # nn.BatchNorm1d(256),
-                nn.Linear(256, args.num_classes))
+                nn.Linear(512, args.num_classes))
 
     def forward(self, img, input_ids, q_attn_mask):
 
@@ -286,8 +289,10 @@ class Model(nn.Module):
 
         h = torch.cat((image_features, text_features), dim=1)
         m = self.associate_memory(h)
+
         out = self.fusion(torch.cat((m,h),dim=1))
-        logits = self.classifier(out.mean(dim=1))
+        out = self.pool(out)
+        logits = self.classifier(out)
 
         return logits
 
@@ -300,7 +305,7 @@ class ModelWrapper(pl.LightningModule):
         self.train_df = train_df
         self.val_df = val_df
 
-        self.loss_fn = FocalLoss(0.6)
+        self.loss_fn = FocalLoss(0.45)
 
         self.train_preds = []
         self.val_preds = []
@@ -320,10 +325,9 @@ class ModelWrapper(pl.LightningModule):
     def forward(self, img, input_ids, q_attn_mask):
         return self.model(img, input_ids, q_attn_mask)
 
-    def training_step(self, batch, batch_idx, dataset="vqarad"):
+    def training_step(self, batch, batch_idx):
         img, question_token, q_attention_mask, target,answer_type  = batch
         question_token = question_token.squeeze(1)
-        attn_mask = attn_mask.squeeze(1)
         q_attention_mask = q_attention_mask.squeeze(1)
 
         out = self(img, question_token, q_attention_mask)
@@ -346,10 +350,9 @@ class ModelWrapper(pl.LightningModule):
         img, question_token, q_attention_mask, target,answer_type  = batch
 
         question_token = question_token.squeeze(1)
-        attn_mask = attn_mask.squeeze(1)
         q_attention_mask = q_attention_mask.squeeze(1)
 
-        out, _ = self(img, question_token, q_attention_mask)
+        out= self(img, question_token, q_attention_mask)
 
         logits = out
 
