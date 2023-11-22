@@ -310,7 +310,7 @@ class Model(nn.Module):
         # c_q = self.associate_question_memory((h,text_features,h))
         # enriched_c = torch.cat((c_i, c_q), dim=1)
         # h= h + enriched_c
-        
+
         out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
         out = self.fusion(out)
         out = self.pool(out)
@@ -327,7 +327,7 @@ class ModelWrapper(pl.LightningModule):
         self.train_df = train_df
         self.val_df = val_df
 
-        self.loss_fn = FocalLoss(0.45)
+        self.loss_fn = FocalLoss(1.13)
 
         self.train_preds = []
         self.val_preds = []
