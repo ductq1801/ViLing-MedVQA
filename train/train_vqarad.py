@@ -56,10 +56,11 @@ if __name__ == '__main__':
     parser.add_argument('--scaling', type=int, required=False, default=0.0442, help="scaling in hopfield")
     parser.add_argument('--quantity', type=int, required=False, default=2, help="Quantity in hopfield pooling")
     parser.add_argument('--classifier_hopfield', type=int, required=False, default=2, help="Quantity in hopfield pooling")
-    ''' only relevant for radrestruct'''
+    parser.add_argument('--slot_size', type=int, required=False, default=96, help="STM slot size")
+    parser.add_argument('--rel_size', type=int, required=False, default=96*2, help="STM rel_size")
+    parser.add_argument('--mlp_size', type=int, required=False, default=256, help="STM mlp")
     parser.add_argument('--classifier_dropout', type=float, required=False, default=0.1, help="how often should image be dropped")
-    parser.add_argument('--match_instances', action='store_true', default=False, help="do optimal instance matching")
-
+    
     args = parser.parse_args()
 
     # create directory for saving params
