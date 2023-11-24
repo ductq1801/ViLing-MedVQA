@@ -265,33 +265,34 @@ class Model(nn.Module):
 
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
-        # self.associate_question_memory = Hopfield(input_size=args.hidden_size,
-        #                                 hidden_size= 512,
-        #                                 num_heads=8, 
-        #                                 #normalize_hopfield_space = True,                          
-        #                                 #stored_pattern_as_static=True,
-        #                                 scaling=args.scaling,
-        #                                 dropout=args.classifier_hopfield,
-        #                             )
-        # self.associate_image_memory = Hopfield(input_size=args.hidden_size,
-        #                                 hidden_size= 512,
-        #                                 num_heads=8, 
-        #                                 #normalize_hopfield_space = True,                          
-        #                                 #stored_pattern_as_static=True,
-        #                                 scaling=args.scaling,
-        #                                 dropout=args.classifier_hopfield,
-        #                             )
-        self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
-        self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
-        self.associate_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,slot_size=args.slot_size*2,mlp_size=args.mlp_size*2,rel_size=args.rel_size*2)
-        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block)
-        self.pool = HopfieldPooling(input_size=args.hidden_size,  
-                                    hidden_size=16,           
-                                    scaling=args.scaling,
-                                    quantity=args.quantity) 
+        self.associate_question_memory = Hopfield(input_size=args.hidden_size,
+                                        hidden_size= args.hidden_size,
+                                        num_heads=8, 
+                                        #normalize_hopfield_space = True,                          
+                                        #stored_pattern_as_static=True,
+                                        scaling=args.scaling,
+                                        dropout=args.classifier_hopfield,
+                                    )
+        self.associate_image_memory = Hopfield(input_size=args.hidden_size,
+                                        hidden_size= args.hidden_size,
+                                        num_heads=args.heads, 
+                                        #normalize_hopfield_space = True,                          
+                                        #stored_pattern_as_static=True,
+                                        scaling=args.scaling,
+                                        dropout=args.classifier_hopfield,
+                                    )
+        self.visio_linguistic = SelfAttention_qkv(dim=args.hidden_size)
+        #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
+        #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
+        #self.associate_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,slot_size=args.slot_size*2,mlp_size=args.mlp_size*2,rel_size=args.rel_size*2)
+        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block,num_prototype=1500)
+        # self.pool = HopfieldPooling(input_size=args.hidden_size,  
+        #                             hidden_size=16,           
+        #                             scaling=args.scaling,
+        #                             quantity=args.quantity) 
         self.classifier = nn.Sequential(
                 nn.Dropout(args.classifier_dropout),
-                nn.Linear(args.hidden_size*args.quantity, 512),
+                nn.Linear(args.hidden_size, 512),
                 nn.ReLU(),
                 nn.Linear(512, args.num_classes))
 
@@ -301,20 +302,21 @@ class Model(nn.Module):
         text_features = self.question_encoder(input_ids, q_attn_mask)
 
         h = torch.cat((image_features, text_features), dim=1)
-        att_r_i,(_,_,_) = self.associate_image_memory(image_features)
-        att_r_t,(_,_,_) = self.associate_question_memory(text_features)
-        att_r_f,(_,_,_) = self.associate_memory(h)
+        #att_r_i,(_,_,_) = self.associate_image_memory(image_features)
+        #att_r_t,(_,_,_) = self.associate_question_memory(text_features)
+        #att_r_f,(_,_,_) = self.associate_memory(h)
 
 
-        # c_i = self.associate_image_memory((h,image_features,h))
-        # c_q = self.associate_question_memory((h,text_features,h))
-        # enriched_c = torch.cat((c_i, c_q), dim=1)
+        c_i = self.associate_image_memory((h,image_features,h))
+        c_q = self.associate_question_memory((h,text_features,h))
+        c_vl = self.visio_linguistic(h)
+        enriched_c = torch.cat((c_i, c_vl, c_q), dim=1)
         # h= h + enriched_c
 
-        out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
-        out = self.fusion(out)
-        out = self.pool(out)
-        logits = self.classifier(out)
+        #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
+        out = self.fusion(enriched_c)
+        #out = self.pool(out)
+        logits = self.classifier(out.mean(1))
 
         return logits
 
@@ -327,7 +329,7 @@ class ModelWrapper(pl.LightningModule):
         self.train_df = train_df
         self.val_df = val_df
 
-        self.loss_fn = FocalLoss(1.13)
+        self.loss_fn = FocalLoss(1.34)
 
         self.train_preds = []
         self.val_preds = []

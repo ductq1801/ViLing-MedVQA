@@ -53,13 +53,13 @@ if __name__ == '__main__':
     parser.add_argument('--heads', type=int, required=False, default=16, help="heads")
     parser.add_argument('--n_layers', type=int, required=False, default=1, help="num of fusion layers")
     parser.add_argument('--acc_grad_batches', type=int, required=False, default=None, help="how many batches to accumulate gradients")
-    parser.add_argument('--scaling', type=int, required=False, default=0.0442, help="scaling in hopfield")
+    parser.add_argument('--scaling', type=int, required=False, default=0.1, help="scaling in hopfield")
     parser.add_argument('--quantity', type=int, required=False, default=2, help="Quantity in hopfield pooling")
-    parser.add_argument('--classifier_hopfield', type=int, required=False, default=2, help="Quantity in hopfield pooling")
+    parser.add_argument('--classifier_hopfield', type=int, required=False, default=0.25, help="Quantity in hopfield pooling")
     parser.add_argument('--slot_size', type=int, required=False, default=96, help="STM slot size")
     parser.add_argument('--rel_size', type=int, required=False, default=96*2, help="STM rel_size")
     parser.add_argument('--mlp_size', type=int, required=False, default=256, help="STM mlp")
-    parser.add_argument('--classifier_dropout', type=float, required=False, default=0.1, help="how often should image be dropped")
+    parser.add_argument('--classifier_dropout', type=float, required=False, default=0.25, help="how often should image be dropped")
     
     args = parser.parse_args()
 
