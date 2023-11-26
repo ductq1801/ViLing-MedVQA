@@ -281,11 +281,11 @@ class Model(nn.Module):
                                         scaling=args.scaling,
                                         dropout=args.classifier_hopfield,
                                     )
-        self.visio_linguistic = SelfAttention_qkv(dim=args.hidden_size)
+        self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
         #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,slot_size=args.slot_size*2,mlp_size=args.mlp_size*2,rel_size=args.rel_size*2)
-        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block,num_prototype=1500)
+        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block,num_prototype=1024)
         # self.pool = HopfieldPooling(input_size=args.hidden_size,  
         #                             hidden_size=16,           
         #                             scaling=args.scaling,
@@ -312,7 +312,7 @@ class Model(nn.Module):
         c_vl = self.visio_linguistic(h)
         enriched_c = torch.cat((c_i, c_vl, c_q), dim=1)
         # h= h + enriched_c
-
+        
         #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
         out = self.fusion(enriched_c)
         #out = self.pool(out)
