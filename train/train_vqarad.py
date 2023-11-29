@@ -47,7 +47,7 @@ if __name__ == '__main__':
     parser.add_argument('--img_feat_size', type=int, required=False, default=14, help="dimension of last pooling layer of img encoder")
     parser.add_argument('--num_question_tokens', type=int, required=False, default=30, help="number of tokens for question")
     parser.add_argument('--hidden_size', type=int, required=False, default=768, help="hidden size")
-    parser.add_argument('--n_block', type=int, required=False, default=8, help="number of prototype block")
+    parser.add_argument('--n_block', type=int, required=False, default=10, help="number of prototype block")
     parser.add_argument('--vocab_size', type=int, required=False, default=30522, help="vocab size")
     parser.add_argument('--type_vocab_size', type=int, required=False, default=2, help="type vocab size")
     parser.add_argument('--heads', type=int, required=False, default=8, help="heads")
@@ -55,11 +55,11 @@ if __name__ == '__main__':
     parser.add_argument('--acc_grad_batches', type=int, required=False, default=None, help="how many batches to accumulate gradients")
     parser.add_argument('--scaling', type=int, required=False, default=0.2, help="scaling in hopfield")
     parser.add_argument('--quantity', type=int, required=False, default=2, help="Quantity in hopfield pooling")
-    parser.add_argument('--classifier_hopfield', type=int, required=False, default=0.45, help="Quantity in hopfield pooling")
+    parser.add_argument('--classifier_hopfield', type=int, required=False, default=0.5, help="Quantity in hopfield pooling")
     parser.add_argument('--slot_size', type=int, required=False, default=96, help="STM slot size")
     parser.add_argument('--rel_size', type=int, required=False, default=96*2, help="STM rel_size")
     parser.add_argument('--mlp_size', type=int, required=False, default=256, help="STM mlp")
-    parser.add_argument('--classifier_dropout', type=float, required=False, default=0.45, help="how often should image be dropped")
+    parser.add_argument('--classifier_dropout', type=float, required=False, default=0.4, help="how often should image be dropped")
     
     args = parser.parse_args()
 
