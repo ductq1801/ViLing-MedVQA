@@ -3,6 +3,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch, math
+def make_mask(feature):
+    return (torch.sum(
+        torch.abs(feature),
+        dim=-1
+    ) == 0).unsqueeze(1).unsqueeze(2)
+
 class MHAtt(nn.Module):
     def __init__(self, args):
         super(MHAtt, self).__init__()
@@ -43,7 +49,7 @@ class MHAtt(nn.Module):
         atted = atted.transpose(1, 2).contiguous().view(
             n_batches,
             -1,
-            self.self.mca_hidden_size
+            self.args.mca_hidden_size
         )
 
         atted = self.linear_merge(atted)
@@ -58,7 +64,7 @@ class MHAtt(nn.Module):
         ) / math.sqrt(d_k)
 
         if mask is not None:
-            scores = scores.masked_fill(mask, -1e9)
+            scores = scores.masked_fill(mask, -1e4)
 
         att_map = F.softmax(scores, dim=-1)
         att_map = self.dropout(att_map)
@@ -77,7 +83,7 @@ class FFN(nn.Module):
         self.mlp = MLP(
             in_size=args.mca_hidden_size,
             mid_size=args.mca_ff,
-            out_size=args.hidden_size,
+            out_size=args.mca_hidden_size,
             dropout_r=args.mca_dropout,
             use_relu=True
         )
@@ -98,10 +104,10 @@ class SA(nn.Module):
         self.ffn = FFN(args)
 
         self.dropout1 = nn.Dropout(args.mca_dropout)
-        self.norm1 = LayerNorm(args.hidden_size)
+        self.norm1 = LayerNorm(args.mca_hidden_size)
 
         self.dropout2 = nn.Dropout(args.mca_dropout)
-        self.norm2 = LayerNorm(args.hidden_size)
+        self.norm2 = LayerNorm(args.mca_hidden_size)
 
     def forward(self, x, x_mask):
         x = self.norm1(x + self.dropout1(

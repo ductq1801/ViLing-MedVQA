@@ -60,10 +60,17 @@ if __name__ == '__main__':
     parser.add_argument('--rel_size', type=int, required=False, default=96*2, help="STM rel_size")
     parser.add_argument('--mlp_size', type=int, required=False, default=256, help="STM mlp")
     parser.add_argument('--classifier_dropout', type=float, required=False, default=0.4, help="how often should image be dropped")
+    ###mca
+    parser.add_argument('--mca_hidden_size', type=int, required=False, default=768, help="MCA hidden size")
+    parser.add_argument('--mca_layer', type=int, required=False, default=3, help="MCA hidden size")
+    parser.add_argument('--mca_heads', type=int, required=False, default=8, help="MCA number head")
+    parser.add_argument('--mca_ff', type=int, required=False, default=768, help="MCA feedforward size")
+    parser.add_argument('--mca_dropout', type=float, required=False, default=0.2, help="MCA dropout rate")
     
     args = parser.parse_args()
 
     # create directory for saving params
+    args.mca_hidden_size_head = int(args.mca_hidden_size / args.mca_heads)
     if not os.path.exists(f'{args.save_dir}/{args.run_name}'):
         os.makedirs(f'{args.save_dir}/{args.run_name}')
     with open(os.path.join(args.save_dir, f'{args.run_name}/commandline_args.txt'), 'w+') as f:

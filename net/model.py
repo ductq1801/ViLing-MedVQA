@@ -19,6 +19,7 @@ from math import sqrt
 from functools import partial
 from net.initialization import init_weights
 from net.stm import STM
+from net.mca import MCA_ED,make_mask
 def max_neg_value(t):
     return -torch.finfo(t.dtype).max
 class LayerNormalization(nn.Module):
@@ -281,6 +282,7 @@ class Model(nn.Module):
 
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
+        self.co_attn = MCA_ED(args)
         self.associate_question_memory = Hopfield(input_size=args.hidden_size,
                                         hidden_size= args.hidden_size,
                                         num_heads=8, 
@@ -297,7 +299,7 @@ class Model(nn.Module):
                                         scaling=args.scaling,
                                         dropout=args.classifier_hopfield,
                                     )
-        self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
+        #self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
         #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,slot_size=args.slot_size*2,mlp_size=args.mlp_size*2,rel_size=args.rel_size*2)
@@ -316,17 +318,19 @@ class Model(nn.Module):
 
         image_features = self.image_encoder(img)
         text_features = self.question_encoder(input_ids, q_attn_mask)
-
-        h = torch.cat((image_features, text_features), dim=1)
+        t_mask = make_mask(text_features)
+        i_mask = make_mask(image_features)
+        t,i = self.co_attn(text_features,image_features,t_mask,i_mask)
+        #h = torch.cat((image_features, text_features), dim=1)
         #att_r_i,(_,_,_) = self.associate_image_memory(image_features)
         #att_r_t,(_,_,_) = self.associate_question_memory(text_features)
         #att_r_f,(_,_,_) = self.associate_memory(h)
 
 
-        c_i = self.associate_image_memory((h,image_features,h))
-        c_q = self.associate_question_memory((h,text_features,h))
-        c_vl = self.visio_linguistic(h)
-        enriched_c = torch.cat((c_i, c_vl, c_q), dim=1)
+        c_i = self.associate_image_memory((image_features,i,image_features))
+        c_q = self.associate_question_memory((text_features,t,text_features))
+        #c_vl = self.visio_linguistic(h)
+        enriched_c = torch.cat((c_i, c_q), dim=1)
         # h= h + enriched_c
         
         #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
@@ -413,7 +417,8 @@ class ModelWrapper(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.args.lr)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=14, gamma=0.3)
+        return [optimizer],[scheduler]
 
     def on_training_epoch_end(self, outputs) -> None:
         preds = torch.cat(self.train_preds).cpu().numpy()
