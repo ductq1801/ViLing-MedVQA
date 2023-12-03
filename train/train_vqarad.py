@@ -70,7 +70,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # create directory for saving params
-    args.mca_hidden_size_head = int(args.mca_hidden_size / args.mca_heads)
+    args.mca_hidden_size_heads = int(args.mca_hidden_size / args.mca_heads)
     if not os.path.exists(f'{args.save_dir}/{args.run_name}'):
         os.makedirs(f'{args.save_dir}/{args.run_name}')
     with open(os.path.join(args.save_dir, f'{args.run_name}/commandline_args.txt'), 'w+') as f:
