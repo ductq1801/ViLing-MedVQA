@@ -327,10 +327,12 @@ class Model(nn.Module):
         #att_r_f,(_,_,_) = self.associate_memory(h)
 
 
-        c_i = self.associate_image_memory((image_features,i,image_features))
-        c_q = self.associate_question_memory((text_features,t,text_features))
+        i = i + self.associate_image_memory((image_features,i,image_features))
+        t = t + self.associate_question_memory((text_features,t,text_features))
+        image_features = image_features + i
+        text_features = text_features + t
         #c_vl = self.visio_linguistic(h)
-        enriched_c = torch.cat((c_i, c_q), dim=1)
+        enriched_c = torch.cat((text_features, image_features), dim=1)
         # h= h + enriched_c
         
         #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
@@ -349,7 +351,7 @@ class ModelWrapper(pl.LightningModule):
         self.train_df = train_df
         self.val_df = val_df
 
-        self.loss_fn = FocalLoss(1.34)
+        self.loss_fn = FocalLoss(sqrt(3))
 
         self.train_preds = []
         self.val_preds = []
