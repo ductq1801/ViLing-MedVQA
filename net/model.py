@@ -20,6 +20,48 @@ from functools import partial
 from net.initialization import init_weights
 from net.stm import STM
 from net.mca import MCA_ED,make_mask
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as fn
+class CoattentionNet(nn.Module):
+    """
+    Predicts an answer to a question about an image using the Hierarchical Question-Image Co-Attention
+    for Visual Question Answering (Lu et al, 2017) paper.
+    """
+    def __init__(self, embed_dim:int =768,k=30):
+        super().__init__()
+        self.W_b = nn.Parameter(torch.randn(embed_dim, embed_dim))
+        self.W_v = nn.Parameter(torch.randn(k, embed_dim))
+        self.W_q = nn.Parameter(torch.randn(k, embed_dim))
+        self.w_hv = nn.Parameter(torch.randn(k, 1))
+        self.w_hq = nn.Parameter(torch.randn(k, 1))
+        self.tanh = nn.Tanh()
+        #self.W_w = nn.Parameter(torch.randn(embed_dim, embed_dim))
+        #self.W_p = nn.Parameter(torch.randn(embed_dim*2, embed_dim))
+        #self.W_s = nn.Parameter(torch.randn(embed_dim*2, embed_dim))
+
+        # self.W_w = nn.Linear(embed_dim, embed_dim)
+        # self.W_p = nn.Linear(embed_dim*2, embed_dim)
+        # self.W_s = nn.Linear(embed_dim*2, embed_dim)
+    def forward(self, V, Q):  # V : B x 512 x 196, Q : B x L x 512
+        V = V.permute(0,2,1)
+        C = torch.matmul(Q, torch.matmul(self.W_b, V)) # B x L x 196
+
+        H_v = self.tanh(torch.matmul(self.W_v, V) + torch.matmul(torch.matmul(self.W_q, Q.permute(0, 2, 1)), C))                            # B x k x 196
+        H_q = self.tanh(torch.matmul(self.W_q, Q.permute(0, 2, 1)) + torch.matmul(torch.matmul(self.W_v, V), C.permute(0, 2, 1)))           # B x k x L
+
+        #a_v = torch.squeeze(fn.softmax(torch.matmul(torch.t(self.w_hv), H_v), dim=2)) # B x 196
+        #a_q = torch.squeeze(fn.softmax(torch.matmul(torch.t(self.w_hq), H_q), dim=2)) # B x L
+
+        a_v = fn.softmax(torch.matmul(torch.t(self.w_hv), H_v), dim=2) # B x 1 x 196
+        a_q = fn.softmax(torch.matmul(torch.t(self.w_hq), H_q), dim=2) # B x 1 x L
+
+        v = torch.squeeze(torch.matmul(a_v, V.permute(0, 2, 1))) # B x 512
+        q = torch.squeeze(torch.matmul(a_q, Q))                  # B x 512
+
+        return v, q
 def max_neg_value(t):
     return -torch.finfo(t.dtype).max
 class LayerNormalization(nn.Module):
@@ -282,30 +324,32 @@ class Model(nn.Module):
 
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
-        self.co_attn = MCA_ED(args)
-        self.associate_question_memory = Hopfield(input_size=args.hidden_size,
-                                        hidden_size= args.hidden_size,
-                                        num_heads=8, 
-                                        #normalize_hopfield_space = True,                          
-                                        #stored_pattern_as_static=True,
-                                        scaling=args.scaling,
-                                        dropout=args.classifier_hopfield,
-                                    )
-        self.associate_image_memory = Hopfield(input_size=args.hidden_size,
-                                        hidden_size= args.hidden_size,
-                                        num_heads=args.heads, 
-                                        #normalize_hopfield_space = True,                          
-                                        #stored_pattern_as_static=True,
-                                        scaling=args.scaling,
-                                        dropout=args.classifier_hopfield,
-                                    )
+        self.gui_attn = MCA_ED(args)
+        # self.associate_question_memory = Hopfield(input_size=args.hidden_size,
+        #                                 hidden_size= args.hidden_size,
+        #                                 num_heads=8, 
+        #                                 #normalize_hopfield_space = True,                          
+        #                                 #stored_pattern_as_static=True,
+        #                                 scaling=args.scaling,
+        #                                 dropout=args.classifier_hopfield,
+        #                             )
+        # self.associate_image_memory = Hopfield(input_size=args.hidden_size,
+        #                                 hidden_size= args.hidden_size,
+        #                                 num_heads=args.heads, 
+        #                                 #normalize_hopfield_space = True,                          
+        #                                 #stored_pattern_as_static=True,
+        #                                 scaling=args.scaling,
+        #                                 dropout=args.classifier_hopfield,
+        #                             )
+        self.co_attn = CoattentionNet()
+        self.memory = STM(args.hidden_size,args.hidden_size)
         #self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
         #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,slot_size=args.slot_size*2,mlp_size=args.mlp_size*2,rel_size=args.rel_size*2)
         self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block,num_prototype=1024)
-        # self.pool = HopfieldPooling(input_size=args.hidden_size,  
-        #                             hidden_size=16,           
+        # self.pool = HopfieldPooling(input_size=args.hidden_size,
+        #                             hidden_size=16,
         #                             scaling=args.scaling,
         #                             quantity=args.quantity) 
         self.classifier = nn.Sequential(
@@ -320,19 +364,20 @@ class Model(nn.Module):
         text_features = self.question_encoder(input_ids, q_attn_mask)
         t_mask = make_mask(text_features)
         i_mask = make_mask(image_features)
-        t,i = self.co_attn(text_features,image_features,t_mask,i_mask)
+        t,i = self.gui_attn(text_features,image_features,t_mask,i_mask)
+        v,q = self.co_attn(image_features,text_features)
         #h = torch.cat((image_features, text_features), dim=1)
-        #att_r_i,(_,_,_) = self.associate_image_memory(image_features)
+        m,(_,_,_) = self.memory(torch.stack(v,q))
         #att_r_t,(_,_,_) = self.associate_question_memory(text_features)
         #att_r_f,(_,_,_) = self.associate_memory(h)
-
-
-        i = i + self.associate_image_memory((image_features,i,image_features))
-        t = t + self.associate_question_memory((text_features,t,text_features))
+        # i = i + self.associate_image_memory((image_features,i,image_features))
+        # t = t + self.associate_question_memory((text_features,t,text_features))
+        # image_features = image_features + i
+        # text_features = text_features + t
+        #c_vl = self.visio_linguistic(h)
         image_features = image_features + i
         text_features = text_features + t
-        #c_vl = self.visio_linguistic(h)
-        enriched_c = torch.cat((text_features, image_features), dim=1)
+        enriched_c = torch.cat((image_features, text_features, m), dim=1)
         # h= h + enriched_c
         
         #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
@@ -465,7 +510,7 @@ class ModelWrapper(pl.LightningModule):
         open_acc1 = (preds[targets != -1][answer_types[targets != -1] == 1] ==
                         targets[targets != -1][answer_types[targets != -1] == 1]).mean() * 100.
         # log
-        self.log('Acc/val_clean', total_acc1, on_step=False, on_epoch=True, prog_bar=True, logger=False)  # for saving
+        self.log('Acc/val_clean', total_acc1, on_step=False, on_epoch=True, prog_bar=True, logger=True)  # for saving
 
         self.logger.experiment.add_scalar('Acc/val_clean', total_acc1, self.current_epoch)
         self.logger.experiment.add_scalar('ClosedAcc/val_clean', closed_acc1, self.current_epoch)
