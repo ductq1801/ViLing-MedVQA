@@ -20,7 +20,7 @@ from functools import partial
 from net.initialization import init_weights
 from net.stm import STM
 from net.mca import MCA_ED,make_mask
-
+from net.ep_memory import MACUnit 
 
 import torch
 import torch.nn as nn
@@ -342,7 +342,7 @@ class Model(nn.Module):
         #                                 dropout=args.classifier_hopfield,
         #                             )
         self.co_attn = CoattentionNet()
-        self.memory = STM(args.hidden_size,args.hidden_size)
+        self.memory = MACUnit(args.hidden_size)
         #self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
         #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
@@ -367,7 +367,7 @@ class Model(nn.Module):
         t,i = self.gui_attn(text_features,image_features,t_mask,i_mask)
         v,q = self.co_attn(image_features,text_features)
         #h = torch.cat((image_features, text_features), dim=1)
-        m,(_,_,_) = self.memory(torch.stack(v,q))
+        m,(_,_,_) = self.memory(i,text_features,image_features)
         #att_r_t,(_,_,_) = self.associate_question_memory(text_features)
         #att_r_f,(_,_,_) = self.associate_memory(h)
         # i = i + self.associate_image_memory((image_features,i,image_features))
