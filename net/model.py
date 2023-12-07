@@ -342,7 +342,7 @@ class Model(nn.Module):
         #                                 dropout=args.classifier_hopfield,
         #                             )
         self.co_attn = CoattentionNet()
-        self.memory = MACUnit(args.hidden_size)
+        self.memory = STM(args.hidden_size,args.hidden_size)
         #self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
         #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
         #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
@@ -366,8 +366,9 @@ class Model(nn.Module):
         i_mask = make_mask(image_features)
         t,i = self.gui_attn(text_features,image_features,t_mask,i_mask)
         v,q = self.co_attn(image_features,text_features)
+        m = v+q
         #h = torch.cat((image_features, text_features), dim=1)
-        m,(_,_,_) = self.memory(i,text_features,image_features)
+        m,(_,_,_) = self.memory(m.permute(1,0,2))
         #att_r_t,(_,_,_) = self.associate_question_memory(text_features)
         #att_r_f,(_,_,_) = self.associate_memory(h)
         # i = i + self.associate_image_memory((image_features,i,image_features))
@@ -377,7 +378,7 @@ class Model(nn.Module):
         #c_vl = self.visio_linguistic(h)
         image_features = image_features + i
         text_features = text_features + t
-        enriched_c = torch.cat((image_features, text_features, m), dim=1)
+        enriched_c = torch.cat((image_features,m.unsqueeze(1), text_features), dim=1)
         # h= h + enriched_c
         
         #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
