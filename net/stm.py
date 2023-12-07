@@ -142,9 +142,9 @@ class STM(nn.Module):
             if torch.cuda.is_available():
                 read_heads = read_heads.cuda()
         else:
-            item_memory_state =  torch.stack([torch.zeros(self.slot_size, self.slot_size) for _ in range(batch_size)])
+            item_memory_state =  torch.zeros(batch_size,self.slot_size, self.slot_size)
             read_heads =  torch.zeros(batch_size, self.out_att_size)
-            rel_memory_state =  torch.stack([torch.zeros(self.num_slot, self.slot_size, self.slot_size) for _ in range(batch_size)])
+            rel_memory_state =  torch.zeros(batch_size,self.num_slot, self.slot_size, self.slot_size)
             if torch.cuda.is_available():
                 item_memory_state = item_memory_state.cuda()
                 read_heads = read_heads.cuda()
