@@ -103,10 +103,10 @@ if __name__ == '__main__':
     norm_tfm = model.model.image_encoder.norm_tfm
     resize_size = model.model.image_encoder.resize_size
 
-    aug_tfm = transforms.Compose([transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
+    aug_tfm = transforms.Compose([#transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
                                   # Cutout(),
                                   transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4),
-                                  transforms.RandomResizedCrop(resize_size, scale=(0.5, 1.0), ratio=(0.75, 1.333),antialias=None),
+                                  #transforms.RandomResizedCrop(resize_size, scale=(0.5, 1.0), ratio=(0.75, 1.333),antialias=None),
                                   transforms.RandomRotation(10)])
 
     train_tfm = transforms.Compose([img_tfm, aug_tfm, norm_tfm]) if norm_tfm is not None else transforms.Compose([img_tfm, aug_tfm])

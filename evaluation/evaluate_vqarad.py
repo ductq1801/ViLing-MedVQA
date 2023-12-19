@@ -11,8 +11,8 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from data_utils.data_vqarad import _load_dataset
-from data_utils.data_vqarad import create_image_to_question_dict, VQARadEval, encode_text_progressive
-from net.model import ModelWrapper
+from data_utils.data_vqarad import _load_dataset, create_image_to_question_dict, VQARad
+from net.model import ModelWrapper,Model
 
 warnings.simplefilter("ignore", UserWarning)
 
@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--max_position_embeddings', type=int, required=False, default=12, help="max length of sequence")
     parser.add_argument('--max_answer_len', type=int, required=False, default=29, help="padding length for free-text answers")
-    parser.add_argument('--batch_size', type=int, required=False, default=16, help="batch size")
+    parser.add_argument('--batch_size', type=int, required=False, default=1, help="batch size")
     parser.add_argument('--lr', type=float, required=False, default=1e-4, help="learning rate'")
     parser.add_argument('--hidden_dropout_prob', type=float, required=False, default=0.3, help="hidden dropout probability")
     parser.add_argument('--smoothing', type=float, required=False, default=None, help="label smoothing")
@@ -87,9 +87,9 @@ if __name__ == '__main__':
     args.num_classes = 495
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    model = ModelWrapper(args, train_df, val_df)
-
+    #m = ModelWrapper(args)
+    model = Model(args)
+    model = model.cuda()
     # use torchinfo to see model architecture and trainable parameters
     from torchinfo import summary
 
@@ -98,12 +98,13 @@ if __name__ == '__main__':
     if args.use_pretrained:
         model.load_state_dict(torch.load(args.model_dir, map_location=torch.device('cpu'))['state_dict'])
 
-    img_tfm = model.model.image_encoder.img_tfm
-    norm_tfm = model.model.image_encoder.norm_tfm
-    resize_size = model.model.image_encoder.resize_size
+    img_tfm = model.image_encoder.img_tfm
+    norm_tfm = model.image_encoder.norm_tfm
+    resize_size = model.image_encoder.resize_size
 
     test_tfm = transforms.Compose([img_tfm, norm_tfm])
-    valloader = DataLoader(val_df, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    valdataset = VQARad(val_df, tfm=test_tfm, args=args)
+    valloader = DataLoader(valdataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     # preds = trainer.predict(model, valloader, return_predictions=True)
     # given the valloader and the predictions pred, compute the accuracy for each batch and create a list of the wrong examples
@@ -114,18 +115,18 @@ if __name__ == '__main__':
     total = 0
     model.eval()
     for i, batch in tqdm(enumerate(valloader)):
+        #print(batch)
         img, question_token, q_attention_mask, target,answer_type  = batch
-        question_token = question_token.unsqueeze(0)
-        q_attention_mask = q_attention_mask.unsqueeze(0)
-        img = img.unsqueeze(0)
+        target = target.cuda()
+        question_token = question_token.cuda()
+        q_attention_mask = q_attention_mask.cuda()
+        img = img.cuda()
         # convert all to tensor
         out= model(img, question_token, q_attention_mask)
 
         logits = out
         pred = torch.argmax(logits, dim=1)
         text_pred = label2ans[pred.item()]
-
-
 
         correct += (pred == target).sum().item()
         total += 1
