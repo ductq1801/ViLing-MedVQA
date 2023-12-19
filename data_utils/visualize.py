@@ -13,6 +13,11 @@ from tqdm import tqdm
 from data_utils.data_vqarad import _load_dataset
 from data_utils.data_vqarad import _load_dataset, create_image_to_question_dict, VQARad
 from net.model import ModelWrapper,Model
+import matplotlib.pyplot as plt
+import cv2
+import numpy as np
+from transformers import AutoTokenizer
+from PIL import Image
 
 warnings.simplefilter("ignore", UserWarning)
 
@@ -21,9 +26,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Finetune on VQARAD")
 
     parser.add_argument('--run_name', type=str, required=False, default="debug", help="run name for wandb")
-    parser.add_argument('--data_dir', type=str, required=False, default="data/vqarad", help="path for data")
+    parser.add_argument('--img_path', type=str, required=False, default="data/vqarad", help="path for data")
+    parser.add_argument('--question', type=str, required=False, default="path to image",
+                        help="question of image")
     parser.add_argument('--model_dir', type=str, required=False, default="",
                         help="path to load weights")
+    parser.add_argument('--data_dir', type=str, required=False, default="data/vqarad", help="path for data")
     parser.add_argument('--save_dir', type=str, required=False, default="cp", help="path to save weights")
     parser.add_argument('--question_type', type=str, required=False, default=None, help="choose specific category if you want")
     parser.add_argument('--use_pretrained', action='store_true', default=False, help="use pretrained weights or not")
@@ -89,11 +97,11 @@ if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #m = ModelWrapper(args)
     model = ModelWrapper(args)
-    
+    tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
     # use torchinfo to see model architecture and trainable parameters
-    from torchinfo import summary
+    #from torchinfo import summary
 
-    summary(model)
+    #summary(model)
 
     if args.use_pretrained:
         model.load_state_dict(torch.load(args.model_dir, map_location=torch.device('cpu'))['state_dict'])
@@ -104,35 +112,45 @@ if __name__ == '__main__':
     resize_size = model.image_encoder.resize_size
 
     test_tfm = transforms.Compose([img_tfm, norm_tfm])
-    valdataset = VQARad(val_df, tfm=test_tfm, args=args)
-    valloader = DataLoader(valdataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    #valdataset = VQARad(val_df, tfm=test_tfm, args=args)
+    #valloader = DataLoader(valdataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
+    image = Image.open(args.img_path)
+    img = test_tfm(image)
+    token = tokenizer(args.question,max_length=30,truncation=True,padding='max_length')
+    question_token = token['input_ids']
+    question_token = torch.tensor(question_token, dtype=torch.long)
+    q_attention_mask = token['attention_mask']
+    q_attention_mask = torch.tensor(q_attention_mask, dtype=torch.long)
     # preds = trainer.predict(model, valloader, return_predictions=True)
     # given the valloader and the predictions pred, compute the accuracy for each batch and create a list of the wrong examples
     # load trainval_label2ans.pkl
     with open('data/vqarad/trainval_label2ans.pkl', 'rb') as f:
         label2ans = cPickle.load(f)
-    correct = 0
-    total = 0
     model.eval()
-    for i, batch in tqdm(enumerate(valloader)):
-        #print(batch)
-        
-        img, question_token, q_attention_mask, target,answer_type  = batch
-        target = target.cuda()
-        question_token = question_token.cuda()
-        q_attention_mask = q_attention_mask.cuda()
-        img = img.cuda()
-        # convert all to tensor
-        out= model(img, question_token, q_attention_mask)
-        #print(out.shape)
-        logits = out
-        pred = logits.softmax(1).argmax(1).detach()
-        #text_pred = label2ans[pred.item()]
+    question_token = question_token.unsqueeze(0).cuda()
+    q_attention_mask = q_attention_mask.unsqueeze(0).cuda()
+    img = img.unsqueeze(0).cuda()
+    # convert all to tensor
+    out= model(img, question_token, q_attention_mask)
+    #print(out.shape)
+    logits = out
+    pred = logits.softmax(1).argmax(1).detach()
+    ans = label2ans[pred]
+    
+    ###visual
+    fig, axes = plt.subplots(1, 1, figsize=(24, 24))
+    ax = axes
+    img = cv2.imread(args.img_path)[..., ::-1]
+    img = cv2.resize(img, (299, 299))
+    text_img = np.zeros((299, 500, 3))
+    text_img = cv2.putText(text_img, f"Question: {args.question} ", (4, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (255, 255, 255), 2, cv2.LINE_AA)
+    text_img = cv2.putText(text_img, f"Answer: {ans}", (4, 130), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (255, 255, 255), 2, cv2.LINE_AA)
+    img = np.concatenate([img, text_img.astype(np.uint8)], axis=1)
+    ax.imshow(img)
+    fig.show()
+    fig.savefig('result.png')
 
-        correct += (pred == target).sum().item()
-        total += 1
-
-    print(correct)
-    print(total)
-    print(f'Accuracy: {correct / total * 100.:.2f}')
+    print(ans)

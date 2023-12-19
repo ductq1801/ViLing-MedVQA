@@ -324,7 +324,7 @@ class Model(nn.Module):
         t,i = self.gui_attn(text_features,image_features,t_mask,i_mask)
         v,q = self.co_attn(image_features,text_features)
         
-        m = torch.cat((q,v,text_features),dim=1)
+        m = torch.cat((v,text_features),dim=1)
         m,(_,_,_) = self.memory(m.permute(1,0,2))
         m = self.norm1(m)
 
