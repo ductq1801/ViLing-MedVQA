@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--max_position_embeddings', type=int, required=False, default=12, help="max length of sequence")
     parser.add_argument('--max_answer_len', type=int, required=False, default=29, help="padding length for free-text answers")
-    parser.add_argument('--batch_size', type=int, required=False, default=1, help="batch size")
+    parser.add_argument('--batch_size', type=int, required=False, default=2, help="batch size")
     parser.add_argument('--lr', type=float, required=False, default=1e-4, help="learning rate'")
     parser.add_argument('--hidden_dropout_prob', type=float, required=False, default=0.3, help="hidden dropout probability")
     parser.add_argument('--smoothing', type=float, required=False, default=None, help="label smoothing")
@@ -123,10 +123,10 @@ if __name__ == '__main__':
         img = img.cuda()
         # convert all to tensor
         out= model(img, question_token, q_attention_mask)
-
+        #print(out.shape)
         logits = out
-        pred = torch.argmax(logits, dim=1)
-        text_pred = label2ans[pred.item()]
+        pred = logits.softmax(1).argmax(1).detach()
+        #text_pred = label2ans[pred.item()]
 
         correct += (pred == target).sum().item()
         total += 1

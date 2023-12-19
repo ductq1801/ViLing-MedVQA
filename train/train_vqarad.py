@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', type=str, required=False, default="data/vqarad", help="path for data")
     parser.add_argument('--model_dir', type=str, required=False, default="",
                         help="path to load weights")
-    parser.add_argument('--save_dir', type=str, required=False, default="checkpoints", help="path to save weights")
+    parser.add_argument('--save_dir', type=str, required=False, default="cp", help="path to save weights")
     parser.add_argument('--question_type', type=str, required=False, default=None, help="choose specific category if you want")
     parser.add_argument('--use_pretrained', action='store_true', default=False, help="use pretrained weights or not")
     parser.add_argument('--mixed_precision', action='store_true', default=False, help="use mixed precision or not")
@@ -62,7 +62,7 @@ if __name__ == '__main__':
     parser.add_argument('--classifier_dropout', type=float, required=False, default=0.4, help="how often should image be dropped")
     ###mca
     parser.add_argument('--mca_hidden_size', type=int, required=False, default=768, help="MCA hidden size")
-    parser.add_argument('--mca_layer', type=int, required=False, default=3, help="MCA hidden size")
+    parser.add_argument('--mca_layer', type=int, required=False, default=6, help="MCA hidden size")
     parser.add_argument('--mca_heads', type=int, required=False, default=8, help="MCA number head")
     parser.add_argument('--mca_ff', type=int, required=False, default=768, help="MCA feedforward size")
     parser.add_argument('--mca_dropout', type=float, required=False, default=0.2, help="MCA dropout rate")
@@ -105,9 +105,9 @@ if __name__ == '__main__':
 
     aug_tfm = transforms.Compose([#transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
                                   # Cutout(),
-                                  transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4),
+                                  transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
                                   #transforms.RandomResizedCrop(resize_size, scale=(0.5, 1.0), ratio=(0.75, 1.333),antialias=None),
-                                  transforms.RandomRotation(10)])
+                                  transforms.RandomRotation(9)])
 
     train_tfm = transforms.Compose([img_tfm, aug_tfm, norm_tfm]) if norm_tfm is not None else transforms.Compose([img_tfm, aug_tfm])
     test_tfm = transforms.Compose([img_tfm, norm_tfm]) if norm_tfm is not None else img_tfm
@@ -121,7 +121,7 @@ if __name__ == '__main__':
     logger = pl.loggers.TensorBoardLogger('runs', name=args.run_name, version=0)
 
     checkpoint_callback = ModelCheckpoint(monitor='Acc/val_clean', dirpath=os.path.join(args.save_dir, args.run_name), filename='{epoch}-{Acc/val_clean:.2f}',
-                                              mode='max', every_n_epochs=1, save_last=True)
+                                              mode='max', every_n_epochs=1, save_last=False)
 
     trainer = Trainer(
         accelerator="gpu" if torch.cuda.is_available() else None,
@@ -133,7 +133,7 @@ if __name__ == '__main__':
         logger=logger,
         callbacks=[checkpoint_callback],
         benchmark=False,
-        deterministic=True
+        deterministic=False
     )
 
     trainer.fit(model, train_dataloaders=trainloader, val_dataloaders=valloader)

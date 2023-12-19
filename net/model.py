@@ -14,22 +14,18 @@ from util.loss import FocalLoss
 from net.image_encoding import ImageEncoderEfficientNet
 from net.question_encoding import QuestionEncoderBERT
 from einops import rearrange
-from hflayers import Hopfield,HopfieldPooling
+#from hflayers import Hopfield,HopfieldPooling
 from math import sqrt
 from functools import partial
 from net.initialization import init_weights
 from net.stm import STM
 from net.mca import MCA_ED,make_mask
 from net.ep_memory import MACUnit 
-
-import torch
-import torch.nn as nn
 import torch.nn.functional as fn
+
+torch.set_float32_matmul_precision('medium')
+
 class CoattentionNet(nn.Module):
-    """
-    Predicts an answer to a question about an image using the Hierarchical Question-Image Co-Attention
-    for Visual Question Answering (Lu et al, 2017) paper.
-    """
     def __init__(self, embed_dim:int =768,k=30):
         super().__init__()
         self.W_b = nn.Parameter(torch.randn(embed_dim, embed_dim))
@@ -298,24 +294,6 @@ class PrototypeBlock(nn.Module):
             x = x + f(x)
             x = x + g(x)
         return x
-class MyBertModel(BertModel):
-    """
-
-    Overwrite BERTModel in order to adapt the positional embeddings for images
-    """
-
-    def __init__(self, config, add_pooling_layer=True, args=None):
-        super().__init__(config)
-        self.config = config
-
-        self.embeddings = MyBertEmbeddings(config, args=args)
-        self.encoder = BertEncoder(config)
-
-        self.pooler = BertPooler(config) if add_pooling_layer else None
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
 
 class Model(nn.Module):
     def __init__(self, args):
@@ -324,34 +302,11 @@ class Model(nn.Module):
 
         self.image_encoder = ImageEncoderEfficientNet(args)
         self.question_encoder = QuestionEncoderBERT(args)
+        self.norm1 = LayerNormalization(args.hidden_size)
         self.gui_attn = MCA_ED(args)
-        # self.associate_question_memory = Hopfield(input_size=args.hidden_size,
-        #                                 hidden_size= args.hidden_size,
-        #                                 num_heads=8, 
-        #                                 #normalize_hopfield_space = True,                          
-        #                                 #stored_pattern_as_static=True,
-        #                                 scaling=args.scaling,
-        #                                 dropout=args.classifier_hopfield,
-        #                             )
-        # self.associate_image_memory = Hopfield(input_size=args.hidden_size,
-        #                                 hidden_size= args.hidden_size,
-        #                                 num_heads=args.heads, 
-        #                                 #normalize_hopfield_space = True,                          
-        #                                 #stored_pattern_as_static=True,
-        #                                 scaling=args.scaling,
-        #                                 dropout=args.classifier_hopfield,
-        #                             )
         self.co_attn = CoattentionNet()
-        self.memory = STM(args.hidden_size,args.hidden_size)
-        #self.visio_linguistic = SelfAttention(dim=args.hidden_size,dim_head=128,dropout=0.4)
-        #self.associate_question_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
-        #self.associate_image_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,out_att_size=args.hidden_size)
-        #self.associate_memory = STM(input_size=args.hidden_size,output_size=args.hidden_size,slot_size=args.slot_size*2,mlp_size=args.mlp_size*2,rel_size=args.rel_size*2)
-        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block,num_prototype=1024)
-        # self.pool = HopfieldPooling(input_size=args.hidden_size,
-        #                             hidden_size=16,
-        #                             scaling=args.scaling,
-        #                             quantity=args.quantity) 
+        self.memory = STM(args.hidden_size,args.hidden_size,num_slot=12,slot_size = 196, rel_size = 196)
+        self.fusion = PrototypeBlock(dim=args.hidden_size,n_block=args.n_block,num_prototype=1000)
         self.classifier = nn.Sequential(
                 nn.Dropout(args.classifier_dropout),
                 nn.Linear(args.hidden_size, 512),
@@ -362,28 +317,21 @@ class Model(nn.Module):
 
         image_features = self.image_encoder(img)
         text_features = self.question_encoder(input_ids, q_attn_mask)
+        
         t_mask = make_mask(text_features)
         i_mask = make_mask(image_features)
+        
         t,i = self.gui_attn(text_features,image_features,t_mask,i_mask)
         v,q = self.co_attn(image_features,text_features)
-        m = v+q
-        #h = torch.cat((image_features, text_features), dim=1)
+        
+        m = torch.cat((q,v,text_features),dim=1)
         m,(_,_,_) = self.memory(m.permute(1,0,2))
-        #att_r_t,(_,_,_) = self.associate_question_memory(text_features)
-        #att_r_f,(_,_,_) = self.associate_memory(h)
-        # i = i + self.associate_image_memory((image_features,i,image_features))
-        # t = t + self.associate_question_memory((text_features,t,text_features))
-        # image_features = image_features + i
-        # text_features = text_features + t
-        #c_vl = self.visio_linguistic(h)
+        m = self.norm1(m)
+
         image_features = image_features + i
         text_features = text_features + t
         enriched_c = torch.cat((image_features,m.unsqueeze(1), text_features), dim=1)
-        # h= h + enriched_c
-        
-        #out = torch.cat((att_r_i, att_r_t,att_r_f),dim=1)
         out = self.fusion(enriched_c)
-        #out = self.pool(out)
         logits = self.classifier(out.mean(1))
 
         return logits
@@ -397,7 +345,7 @@ class ModelWrapper(pl.LightningModule):
         self.train_df = train_df
         self.val_df = val_df
 
-        self.loss_fn = FocalLoss(sqrt(3))
+        self.loss_fn = FocalLoss(2)
 
         self.train_preds = []
         self.val_preds = []
@@ -465,7 +413,7 @@ class ModelWrapper(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.args.lr)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=14, gamma=0.3)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.3)
         return [optimizer],[scheduler]
 
     def on_training_epoch_end(self, outputs) -> None:
